@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TaskFlow - Project & Task Manager</title>
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, sans-serif; }
+    body { background: var(--bg); color: var(--text); transition: 0.3s; }
+    :root { --bg: #f4f4f4; --text: #333; --card: white; --primary: #007BFF; }
+    body.dark { --bg: #121212; --text: #f4f4f4; --card: #1e1e1e; --primary: #0d6efd; }
+    header { padding: 1rem; background: var(--primary); color: white; display: flex; justify-content: space-between; align-items: center; }
+    .theme-toggle { cursor: pointer; background: none; border: none; color: white; font-size: 1rem; }
+    main { padding: 1rem; display: grid; grid-template-columns: repeat(auto-fit,minmax(300px,1fr)); gap: 1rem; }
+    .project { background: var(--card); padding: 1rem; border-radius: 8px; }
+    .project h2 { margin-bottom: 0.5rem; }
+    .columns { display: flex; gap: 0.5rem; overflow-x: auto; }
+    .column { flex: 1; background: var(--bg); padding: 0.5rem; border-radius: 8px; min-height: 200px; }
+    .task { background: var(--card); padding: 0.5rem; margin: 0.5rem 0; border-radius: 5px; cursor: grab; }
+    form { display: flex; gap: 0.5rem; margin: 0.5rem 0; }
+    input, button, select { padding: 0.5rem; border: 1px solid #ccc; border-radius: 5px; }
+    button { cursor: pointer; background: var(--primary); color: white; border: none; }
+    .delete { background: red; }
+</style>
+</head>
+<body>
+<header>
+    <h1>TaskFlow</h1>
+    <button class="theme-toggle">🌙 Dark Mode</button>
+</header>
+
+<section style="padding:1rem;">
+    <form id="newProjectForm">
+        <input type="text" id="projectName" placeholder="New Project Name" required>
+        <button type="submit">Add Project</button>
+    </form>
+</section>
+
+<main id="projects"></main>
+
+<script>
+const projectsEl = document.getElementById("projects");
+const projectForm = document.getElementById("newProjectForm");
+const projectNameInput = document.getElementById("projectName");
+const themeToggle = document.querySelector(".theme-toggle");
+
+let projects = JSON.parse(localStorage.getItem("taskflow-projects") || "[]");
+
+// Theme toggle
+themeToggle.addEventListener("click", () => {
+    document.body.classList.toggle("dark");
+    themeToggle.textContent = document.body.classList.contains("dark") ? "☀ Light Mode" : "🌙 Dark Mode";
+    localStorage.setItem("taskflow-theme", document.body.classList.contains("dark") ? "dark" : "light");
+});
+
+// Load theme
+if (localStorage.getItem("taskflow-theme") === "dark") {
+    document.body.classList.add("dark");
+    themeToggle.textContent = "☀ Light Mode";
+}
+
+// Add Project
+projectForm.addEventListener("submit", e => {
+    e.preventDefault();
+    const name = projectNameInput.value.trim();
+    if (!name) return;
+    projects.push({ id: Date.now(), name, tasks: [] });
+    projectNameInput.value = "";
+    saveAndRender();
+});
+
+// Render all projects
+function renderProjects() {
+    projectsEl.innerHTML = "";
+    projects.forEach(project => {
+        const projectDiv = document.createElement("div");
+        projectDiv.className = "project";
+        projectDiv.innerHTML = `
+            <h2>${project.name} <button class="delete" data-id="${project.id}">Delete</button></h2>
+            <form data-id="${project.id}" class="taskForm">
+                <input type="text" placeholder="New Task" required>
+                <select>
+                    <option value="todo">To Do</option>
+                    <option value="progress">In Progress</option>
+                    <option value="done">Done</option>
+                </select>
+                <button type="submit">Add</button>
+            </form>
+            <div class="columns">
+                <div class="column" data-status="todo" data-id="${project.id}"><h3>To Do</h3></div>
+                <div class="column" data-status="progress" data-id="${project.id}"><h3>In Progress</h3></div>
+                <div class="column" data-status="done" data-id="${project.id}"><h3>Done</h3></div>
+            </div>
+        `;
+        projectsEl.appendChild(projectDiv);
+
+        // Render tasks
+        project.tasks.forEach(task => {
+            const taskEl = document.createElement("div");
+            taskEl.className = "task";
+            taskEl.draggable = true;
+            taskEl.textContent = task.text;
+            taskEl.dataset.id = task.id;
+            taskEl.dataset.status = task.status;
+            const col = projectDiv.querySelector(.column[data-status="${task.status}"]);
+            col.appendChild(taskEl);
+        });
+    });
+
+    // Task form listeners
+    document.querySelectorAll(".taskForm").forEach(form => {
+        form.addEventListener("submit", e => {
+            e.preventDefault();
+            const id = +form.dataset.id;
+            const text = form.querySelector("input").value.trim();
+            const status = form.querySelector("select").value;
+            if (!text) return;
+            const project = projects.find(p => p.id === id);
+            project.tasks.push({ id: Date.now(), text, status });
+            saveAndRender();
+        });
+    });
+
+    // Delete project listeners
+    document.querySelectorAll(".delete").forEach(btn => {
+        btn.addEventListener("click", () => {
+            projects = projects.filter(p => p.id !== +btn.dataset.id);
+            saveAndRender();
+        });
+    });
+
+    enableDragAndDrop();
+}
+
+// Drag & Drop
+function enableDragAndDrop() {
+    document.querySelectorAll(".task").forEach(task => {
+        task.addEventListener("dragstart", e => {
+            e.dataTransfer.setData("text/plain", JSON.stringify({ 
+                taskId: task.dataset.id, 
+                projectId: task.closest(".project").querySelector(".taskForm").dataset.id 
+            }));
+        });
+    });
+
+    document.querySelectorAll(".column").forEach(col => {
+        col.addEventListener("dragover", e => e.preventDefault());
+        col.addEventListener("drop", e => {
+            const data = JSON.parse(e.dataTransfer.getData("text/plain"));
+            const project = projects.find(p => p.id === +data.projectId);
+            const task = project.tasks.find(t => t.id === +data.taskId);
+            task.status = col.dataset.status;
+            saveAndRender();
+        });
+    });
+}
+
+function saveAndRender() {
+    localStorage.setItem("taskflow-projects", JSON.stringify(projects));
+    renderProjects();
+}
+
+renderProjects();
+</script>
+</body>
+</html>
